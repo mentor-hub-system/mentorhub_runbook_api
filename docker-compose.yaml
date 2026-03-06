@@ -4,20 +4,20 @@ services:
   # Custom Runbook Service (Development Profile)
   ##################################
   runbook-api:
-    image: {{org.docker_host}}/{{org.docker_org}}/{{info.slug}}_runbook_api:latest
+    image: ghcr.io/mentor-hub-system/mentorhub_runbook_api:latest
     container_name: runbook_api
     restart: unless-stopped
     ports:
-      - "127.0.0.1:{{info.base_port + 0}}:{{info.base_port + 0}}"
+      - "127.0.0.1:8383:8383"
     environment:
-      API_PORT: {{info.base_port + 0}}
+      API_PORT: 8383
       ENABLE_LOGIN: "true"
       LOGGING_LEVEL: "INFO"
       JWT_SECRET: ${JWT_SECRET}
       GITHUB_TOKEN: ${GITHUB_TOKEN}
       SSH_KEY: ${SSH_KEY:-}
       MOUNT_DIR: ${MOUNT_DIR}
-      UI_HEADER: "{{info.name}} DEV Runbooks"
+      UI_HEADER: "Mentor Hub DEV Runbooks"
     volumes:
       - ./runbooks:/runbooks
       - ./execution:/execution
@@ -28,11 +28,11 @@ services:
     container_name: runbook_spa
     restart: unless-stopped
     ports:
-      - "127.0.0.1:{{info.base_port + 1}}:80"
+      - "127.0.0.1:8384:80"
     environment:
       API_HOST: runbook-api
-      API_PORT: {{info.base_port + 0}}
-      IDP_LOGIN_URI: ${IDP_LOGIN_URI:-http://localhost:{{info.base_port + 1}}/login}
+      API_PORT: 8383
+      IDP_LOGIN_URI: ${IDP_LOGIN_URI:-http://localhost:8384/login}
     depends_on:
       runbook-api:
         condition: service_started

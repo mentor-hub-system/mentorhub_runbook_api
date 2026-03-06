@@ -1,73 +1,90 @@
-.PHONY: help test clean merge diff take
+.PHONY: help dev deploy down open validate execute get-token container push build-package publish-package delete-package tail
+ORG ?= mentor-hub-system
+
+CONTAINER_IMAGE ?= ghcr.io/mentor-hub-system/mentorhub_runbook_api:latest
+API_URL ?= http://localhost:8384/
+RUNBOOK ?= 
+DATA ?= {"env_vars":{}}
 
 help:
-	@echo "  make test             - Run tests using ~/temp folder"
-	@echo "  make clean            - Clean up temporary test files"
-	@echo "  make merge <specs_path>  - Merge templates (repo is .); e.g. make merge ../Specifications"
-	@echo "  make diff <filespec>  - Diff temp vs expected for a single file"
-	@echo "  make take <filespec>  - Overwrite expected file with temp file"
+	@echo "Available commands:"
+	@echo "  make container        - Build container with your runbooks"
+	@echo "  make dev              - Run your runbook in Dev mode (Mounts ./runbooks)"
+	@echo "  make deploy           - Run your runbook in Deploy mode (Packaged Runbooks)"
+	@echo "  make down             - Shut down containers"
+	@echo "  make open             - Open web UI in browser"
+	@echo "  make tail             - Tail API logs (captures terminal, Ctrl+C to exit)"
+	@echo "  make validate         - Validate a runbook (requires RUNBOOK=path/to/runbook.md)"
+	@echo "  make execute          - Execute a runbook (requires RUNBOOK=path/to/runbook.md)"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make container && make dev"
+	@echo "  make validate RUNBOOK=./runbooks/MyRunbook.md"
+	@echo "  make execute RUNBOOK=./runbooks/MyRunbook.md DATA='{\"env_vars\":{\"VAR1\":\"value1\"}}'"
+	@echo "  make deploy"
 
-test:
-	@TEMP_REPO="$$HOME/tmp/testRepo"; \
-	echo "Setting up temporary testing folder at $$TEMP_REPO..."; \
-	rm -rf "$$TEMP_REPO"; \
-	mkdir -p "$$TEMP_REPO"; \
-	cp -r . "$$TEMP_REPO"
-	@echo "Debug: Checking specifications structure..."; \
-	find .stage0_template/Specifications -name "*.yaml" | head -10
-	@echo "Running the container..."; \
-	LOG_LEVEL="$${LOG_LEVEL:-DEBUG}"; \
-	docker run --rm \
-		-v "$$HOME/tmp/testRepo:/repo" \
-		-v "$$(pwd)/.stage0_template/specifications:/specifications" \
-		-e LOG_LEVEL="$$LOG_LEVEL" \
-		ghcr.io/agile-learning-institute/stage0_runbook_merge:latest
-	@echo "Checking output..."; \
-	diff -qr "$$(pwd)/.stage0_template/test_expected/" "$$HOME/tmp/testRepo/" || true
-	@echo "Done."
+container:
+	@echo "Building container image: $(CONTAINER_IMAGE)"
+	@DOCKER_BUILDKIT=0 docker build -f Dockerfile -t $(CONTAINER_IMAGE) .
+	@echo "Built: $(CONTAINER_IMAGE)"
 
-clean:
-	@echo "Removing temporary test repo at $$HOME/tmp/testRepo..."; \
-	rm -rf "$$HOME/tmp/testRepo"
+push:
+	@echo "Pushing container image: $(CONTAINER_IMAGE)"
+	@docker push $(CONTAINER_IMAGE) 
+	@echo "Pushed: $(CONTAINER_IMAGE)"
 
-merge:
-	@SPECS_PATH="$(firstword $(filter-out $@,$(MAKECMDGOALS)))"; \
-	if [ -z "$$SPECS_PATH" ]; then \
-		echo "Usage: make merge <specs_path>"; \
-		echo "  e.g. make merge ../Specifications"; \
-		exit 1; \
-	fi; \
-	echo "Running merge: repo=. specs=$$SPECS_PATH"; \
-	LOG_LEVEL="$${LOG_LEVEL:-INFO}"; \
-	docker run --rm \
-		-v ".:/repo" \
-		-v "$$SPECS_PATH:/specifications" \
-		-e LOG_LEVEL="$$LOG_LEVEL" \
-		ghcr.io/agile-learning-institute/stage0_runbook_merge:latest
+build-package: container
+publish-package: push
+delete-package:
+	@echo "Deleting container package..."
+	@gh api -X DELETE "/orgs/mentor-hub-system/packages/container/mentorhub_runbook_api"
 
-diff:
-	@FILESPEC="$(firstword $(filter-out diff,$(MAKECMDGOALS)))"; \
-	if [ -z "$$FILESPEC" ]; then \
-		echo "Usage: make diff <filespec>  (e.g. make diff DeveloperEdition/mh)"; \
-		exit 1; \
-	fi; \
-	TEMP="$$HOME/tmp/testRepo/$$FILESPEC"; \
-	EXP="$(PWD)/.stage0_template/test_expected/$$FILESPEC"; \
-	if [ ! -f "$$TEMP" ]; then echo "Temp file not found: $$TEMP"; exit 1; fi; \
-	if [ ! -f "$$EXP" ]; then echo "Expected file not found: $$EXP"; exit 1; fi; \
-	diff "$$TEMP" "$$EXP"
+dev:
+	@echo "Shutting down centralized services..."
+	@mh down || true
+	@echo "Starting local development services..."
+	@mkdir -p execution
+	@export MOUNT_DIR=$$(pwd)/execution && export JWT_SECRET=$$(date +%s) && docker compose up -d
+	@$(MAKE) open
 
-take:
-	@FILESPEC="$(firstword $(filter-out take,$(MAKECMDGOALS)))"; \
-	if [ -z "$$FILESPEC" ]; then \
-		echo "Usage: make take <filespec>  (e.g. make take DeveloperEdition/mh)"; \
-		exit 1; \
-	fi; \
-	TEMP="$$HOME/tmp/testRepo/$$FILESPEC"; \
-	EXP="$(PWD)/.stage0_template/test_expected/$$FILESPEC"; \
-	if [ ! -f "$$TEMP" ]; then echo "Temp file not found: $$TEMP"; exit 1; fi; \
-	cp "$$TEMP" "$$EXP"; \
-	echo "Updated $$EXP from $$TEMP"
+deploy:
+	@$(MAKE) down || true
+	@mh up runbook
+	@$(MAKE) open
+	
+down:
+	@echo "Shutting down local containers..."
+	@export MOUNT_DIR=foo && export JWT_SECRET=bar && docker compose down || true
+	@echo "Shutting down centralized services..."
+	@mh down || true
 
-%:
-	@:
+open:
+	@echo "Opening web UI..."
+	@open -a 'Google Chrome' 'http://localhost:8384' || google-chrome 'http://localhost:8384' || xdg-open 'http://localhost:8384'
+
+get-token:
+	@curl -s -X POST $(API_URL)/dev-login \
+		-H "Content-Type: application/json" \
+		-d '{"subject": "dev-user", "roles": ["sre", "api", "data", "ux"]}' \
+		| jq -r '.access_token // .token // empty'
+
+validate:
+	@FILENAME=$$(basename $(RUNBOOK)); \
+	TOKEN=$$(make -s get-token); \
+	curl -s -X PATCH "$(API_URL)/api/runbooks/$$FILENAME/validate" \
+		-H "Authorization: Bearer $$TOKEN" \
+		-H "Content-Type: application/json" \
+		-d '$(DATA)' \
+		| jq '.' || cat
+
+execute:
+	@FILENAME=$$(basename $(RUNBOOK)); \
+	TOKEN=$$(make -s get-token); \
+	curl -s -X POST "$(API_URL)/api/runbooks/$$FILENAME/execute" \
+		-H "Authorization: Bearer $$TOKEN" \
+		-H "Content-Type: application/json" \
+		-d '$(DATA)' \
+		| jq '.' || cat
+
+tail:
+	@docker logs -f stage0_runbook_api

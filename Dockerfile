@@ -3,7 +3,7 @@
 # (Base already includes Python 3.12 and pipenv)
 ##################################
 FROM ghcr.io/agile-learning-institute/stage0_runbook_api:latest
-LABEL org.opencontainers.image.source="{{org.git_host}}/{{org.git_org}}/{{info.slug}}_runbook_api"
+LABEL org.opencontainers.image.source="https://github.com/mentor-hub-system/mentorhub_runbook_api"
 
 ##################################
 # Install all dependencies (cached unless base image changes)
